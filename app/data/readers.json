@@ -1,0 +1,44 @@
+{
+  "readers": [
+    {
+      "id": 1,
+      "name": "Sweta Rajput",
+      "membership_id": "MEM002",
+      "email": "",
+      "phone": "",
+      "membership_type": "Standard",
+      "join_date": "2024-01-01",
+      "books_borrowed": []
+    },
+    {
+      "id": 2,
+      "name": "Jane Doe",
+      "membership_id": "MEM456",
+      "email": "",
+      "phone": "",
+      "membership_type": "Standard",
+      "join_date": "2024-01-01",
+      "books_borrowed": []
+    },
+    {
+      "id": 3,
+      "name": "Jane Doe",
+      "membership_id": "MEM456",
+      "email": "",
+      "phone": "",
+      "membership_type": "Standard",
+      "join_date": "2024-01-01",
+      "books_borrowed": []
+    },
+    {
+      "id": 4,
+      "name": "Jane Doe",
+      "membership_id": "MEM456",
+      "email": "",
+      "phone": "",
+      "membership_type": "Standard",
+      "join_date": "2024-01-01",
+      "books_borrowed": []
+    }
+  ]
+}

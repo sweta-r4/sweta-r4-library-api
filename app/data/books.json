@@ -1,0 +1,22 @@
+{
+  "books": [
+    {
+      "id": 1,
+      "title": "Advanced Python",
+      "author": "Jane Smith",
+      "isbn": "",
+      "published_year": null,
+      "genre": "",
+      "available": true
+    },
+    {
+      "id": 2,
+      "title": "Learning FastAPI",
+      "author": "Alice Walker",
+      "isbn": "",
+      "published_year": null,
+      "genre": "",
+      "available": true
+    }
+  ]
+}
