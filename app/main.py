@@ -1,561 +1,792 @@
-from fastapi import FastAPI, Request, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Depends
+from typing import List, Dict, Optional
 import logging
 import os
-import time
-from typing import List, Dict, Optional
+import sqlite3
+import json
+from datetime import datetime
+from pydantic import BaseModel, validator
 
-# Ensure logs directory exists in the ROOT directory (not inside app/)
-current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.dirname(current_dir)  # Go up one level to the root
-logs_dir = os.path.join(root_dir, "logs")
-os.makedirs(logs_dir, exist_ok=True)
-
-# Clear any existing logging configuration
-for handler in logging.root.handlers[:]:
-    logging.root.removeHandler(handler)
-
-# Setup logging to file in the ROOT logs directory
-log_file_path = os.path.join(logs_dir, "app.log")
+# Setup logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-    filename=log_file_path,
-    filemode="a"  # Append mode
+    handlers=[
+        logging.FileHandler("app.log"),
+        logging.StreamHandler()
+    ]
 )
 
-# Also add console handler to see logs in terminal
-console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
-formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-console_handler.setFormatter(formatter)
-logging.getLogger().addHandler(console_handler)
-
-# MANAGER CLASSES
-
-class BaseManager:
-    def __init__(self, file_name: str):
+# Database Manager
+class DatabaseManager:
+    def __init__(self, db_name: str = "library.db"):
         self.current_dir = os.path.dirname(os.path.abspath(__file__))
         self.data_dir = os.path.join(self.current_dir, "data")
-        self.file_path = os.path.join(self.data_dir, file_name)
+        self.db_path = os.path.join(self.data_dir, db_name)
         
-        # Ensure data directory exists
+        # Create data directory if it doesn't exist
         os.makedirs(self.data_dir, exist_ok=True)
         
-        # Ensure file exists
-        if not os.path.exists(self.file_path):
-            open(self.file_path, 'w').close()
-
-class BookManager(BaseManager):
-    def __init__(self):
-        super().__init__("books.txt")
-        self.entity_name = "book"
-
-    def get_all_books(self) -> List[Dict]:
-        """Get all books from the file"""
-        try:
-            books = []
-            with open(self.file_path, 'r') as file:
-                for line_num, line in enumerate(file, 1):
-                    if line.strip():
-                        parts = line.strip().split(', ')
-                        if len(parts) >= 2:
-                            books.append({
-                                "id": line_num,
-                                "title": parts[0],
-                                "author": parts[1] if len(parts) > 1 else "Unknown"
-                            })
-            logging.info(f"Retrieved {len(books)} books")
-            return books
-        except Exception as e:
-            logging.error(f"Error reading books file: {str(e)}")
-            return []
-
-    def get_book_by_id(self, book_id: int) -> Optional[Dict]:
-        """Get a specific book by ID"""
-        books = self.get_all_books()
-        for book in books:
-            if book["id"] == book_id:
-                return book
-        return None
-
-    def add_book(self, title: str, author: str) -> Dict:
-        """Add a new book to the file"""
-        try:
-            with open(self.file_path, 'a') as file:
-                file.write(f"{title}, {author}\n")
-            
-            # Get the new book ID
-            books = self.get_all_books()
-            new_book = books[-1] if books else None
-            
-            logging.info(f"Added new book: {title} by {author}")
-            return new_book
-        except Exception as e:
-            logging.error(f"Error adding book: {str(e)}")
-            raise e
-
-    def update_book(self, book_id: int, title: str, author: str) -> Optional[Dict]:
-        """Update a book by its ID"""
-        try:
-            books = self.get_all_books()
-            updated = False
-            
-            for book in books:
-                if book["id"] == book_id:
-                    book["title"] = title
-                    book["author"] = author
-                    updated = True
-                    break
-            
-            if updated:
-                # Rewrite the entire file
-                with open(self.file_path, 'w') as file:
-                    for book in books:
-                        file.write(f"{book['title']}, {book['author']}\n")
-                
-                logging.info(f"Updated book ID {book_id}: {title} by {author}")
-                return self.get_book_by_id(book_id)
-            else:
-                logging.warning(f"Book with ID {book_id} not found for update")
-                return None
-                
-        except Exception as e:
-            logging.error(f"Error updating book: {str(e)}")
-            raise e
-
-    def delete_book(self, book_id: int) -> bool:
-        """Delete a book by its ID"""
-        try:
-            books = self.get_all_books()
-            original_count = len(books)
-            
-            # Filter out the book to delete
-            books = [book for book in books if book["id"] != book_id]
-            
-            if len(books) < original_count:
-                # Rewrite the file without the deleted book
-                with open(self.file_path, 'w') as file:
-                    for book in books:
-                        file.write(f"{book['title']}, {book['author']}\n")
-                
-                logging.info(f"Deleted book with ID {book_id}")
-                return True
-            else:
-                logging.warning(f"Book with ID {book_id} not found for deletion")
-                return False
-                
-        except Exception as e:
-            logging.error(f"Error deleting book: {str(e)}")
-            raise e
-
-class ReaderManager(BaseManager):
-    def __init__(self):
-        super().__init__("readers.txt")
-        self.entity_name = "reader"
-
-    def get_all_readers(self) -> List[Dict]:
-        """Get all readers from the file"""
-        try:
-            readers = []
-            if os.path.exists(self.file_path):
-                with open(self.file_path, 'r') as file:
-                    for line_num, line in enumerate(file, 1):
-                        if line.strip():
-                            parts = line.strip().split(', ')
-                            if len(parts) >= 2:
-                                readers.append({
-                                    "id": line_num,
-                                    "name": parts[0],
-                                    "membership_id": parts[1]
-                                })
-            logging.info(f"Retrieved {len(readers)} readers")
-            return readers
-        except Exception as e:
-            logging.error(f"Error reading readers file: {str(e)}")
-            return []
-
-    def get_reader_by_id(self, reader_id: int) -> Optional[Dict]:
-        """Get a specific reader by ID"""
-        readers = self.get_all_readers()
-        for reader in readers:
-            if reader["id"] == reader_id:
-                return reader
-        return None
-
-    def add_reader(self, name: str, membership_id: str) -> Dict:
-        """Add a new reader to the file"""
-        try:
-            with open(self.file_path, 'a') as file:
-                file.write(f"{name}, {membership_id}\n")
-            
-            readers = self.get_all_readers()
-            new_reader = readers[-1] if readers else None
-            
-            logging.info(f"Added new reader: {name} with membership ID {membership_id}")
-            return new_reader
-        except Exception as e:
-            logging.error(f"Error adding reader: {str(e)}")
-            raise e
-
-    def update_reader(self, reader_id: int, name: str, membership_id: str) -> Optional[Dict]:
-        """Update a reader by ID"""
-        try:
-            readers = self.get_all_readers()
-            updated = False
-            
-            for reader in readers:
-                if reader["id"] == reader_id:
-                    reader["name"] = name
-                    reader["membership_id"] = membership_id
-                    updated = True
-                    break
-            
-            if updated:
-                with open(self.file_path, 'w') as file:
-                    for reader in readers:
-                        file.write(f"{reader['name']}, {reader['membership_id']}\n")
-                
-                logging.info(f"Updated reader ID {reader_id}: {name} with membership ID {membership_id}")
-                return self.get_reader_by_id(reader_id)
-            else:
-                logging.warning(f"Reader with ID {reader_id} not found for update")
-                return None
-                
-        except Exception as e:
-            logging.error(f"Error updating reader: {str(e)}")
-            raise e
-
-    def delete_reader(self, reader_id: int) -> bool:
-        """Delete a reader by ID"""
-        try:
-            readers = self.get_all_readers()
-            original_count = len(readers)
-            
-            readers = [reader for reader in readers if reader["id"] != reader_id]
-            
-            if len(readers) < original_count:
-                with open(self.file_path, 'w') as file:
-                    for reader in readers:
-                        file.write(f"{reader['name']}, {reader['membership_id']}\n")
-                
-                logging.info(f"Deleted reader with ID {reader_id}")
-                return True
-            else:
-                logging.warning(f"Reader with ID {reader_id} not found for deletion")
-                return False
-                
-        except Exception as e:
-            logging.error(f"Error deleting reader: {str(e)}")
-            raise e
-
-class StaffManager(BaseManager):
-    def __init__(self):
-        super().__init__("staff.txt")
-        self.entity_name = "staff"
-
-    def get_all_staff(self) -> List[Dict]:
-        """Get all staff members from the file"""
-        try:
-            staff_members = []
-            if os.path.exists(self.file_path):
-                with open(self.file_path, 'r') as file:
-                    for line_num, line in enumerate(file, 1):
-                        if line.strip():
-                            parts = line.strip().split(', ')
-                            if len(parts) >= 2:
-                                staff_members.append({
-                                    "id": line_num,
-                                    "name": parts[0],
-                                    "position": parts[1]
-                                })
-            logging.info(f"Retrieved {len(staff_members)} staff members")
-            return staff_members
-        except Exception as e:
-            logging.error(f"Error reading staff file: {str(e)}")
-            return []
-
-    def get_staff_by_id(self, staff_id: int) -> Optional[Dict]:
-        """Get a specific staff member by ID"""
-        staff_members = self.get_all_staff()
-        for staff in staff_members:
-            if staff["id"] == staff_id:
-                return staff
-        return None
-
-    def add_staff(self, name: str, position: str) -> Dict:
-        """Add a new staff member to the file"""
-        try:
-            with open(self.file_path, 'a') as file:
-                file.write(f"{name}, {position}\n")
-            
-            staff_members = self.get_all_staff()
-            new_staff = staff_members[-1] if staff_members else None
-            
-            logging.info(f"Added new staff member: {name} as {position}")
-            return new_staff
-        except Exception as e:
-            logging.error(f"Error adding staff: {str(e)}")
-            raise e
-
-    def update_staff(self, staff_id: int, name: str, position: str) -> Optional[Dict]:
-        """Update a staff member by ID"""
-        try:
-            staff_members = self.get_all_staff()
-            updated = False
-            
-            for staff in staff_members:
-                if staff["id"] == staff_id:
-                    staff["name"] = name
-                    staff["position"] = position
-                    updated = True
-                    break
-            
-            if updated:
-                with open(self.file_path, 'w') as file:
-                    for staff in staff_members:
-                        file.write(f"{staff['name']}, {staff['position']}\n")
-                
-                logging.info(f"Updated staff ID {staff_id}: {name} as {position}")
-                return self.get_staff_by_id(staff_id)
-            else:
-                logging.warning(f"Staff with ID {staff_id} not found for update")
-                return None
-                
-        except Exception as e:
-            logging.error(f"Error updating staff: {str(e)}")
-            raise e
-
-    def delete_staff(self, staff_id: int) -> bool:
-        """Delete a staff member by ID"""
-        try:
-            staff_members = self.get_all_staff()
-            original_count = len(staff_members)
-            
-            staff_members = [staff for staff in staff_members if staff["id"] != staff_id]
-            
-            if len(staff_members) < original_count:
-                with open(self.file_path, 'w') as file:
-                    for staff in staff_members:
-                        file.write(f"{staff['name']}, {staff['position']}\n")
-                
-                logging.info(f"Deleted staff with ID {staff_id}")
-                return True
-            else:
-                logging.warning(f"Staff with ID {staff_id} not found for deletion")
-                return False
-                
-        except Exception as e:
-            logging.error(f"Error deleting staff: {str(e)}")
-            raise e
-
-# FASTAPI APPLICATION
-
-app = FastAPI(title="Library Management System", version="1.0.0")
-
-# Initialize managers
-book_manager = BookManager()
-reader_manager = ReaderManager()
-staff_manager = StaffManager()
-
-# Request counter and error counter
-request_counter: Dict[str, int] = {}
-error_counter = 0
-
-# Middleware for enhanced logging and monitoring
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = time.time()
+        self.init_database()
     
-    # Log incoming request
-    logging.info(f"Request: {request.method} {request.url.path}")
+    def get_connection(self) -> sqlite3.Connection:
+        """Get a database connection"""
+        return sqlite3.connect(self.db_path)
     
-    # Count requests by endpoint
-    endpoint = request.url.path
-    request_counter[endpoint] = request_counter.get(endpoint, 0) + 1
+    def init_database(self) -> None:
+        """Initialize database with required tables"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        # Books table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS books (
+                book_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                author TEXT NOT NULL,
+                genre TEXT,
+                stock INTEGER DEFAULT 1
+            )
+        ''')
+        
+        # Staff table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS staff (
+                staff_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                role TEXT NOT NULL,
+                contact TEXT
+            )
+        ''')
+        
+        # Readers table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS readers (
+                reader_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                contact TEXT,
+                borrowed_books TEXT DEFAULT '[]'
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
+        logging.info("Database initialized successfully!")
     
+    def execute_query(self, query: str, params: tuple = ()) -> List[Dict]:
+        """Execute a query and return results as dictionaries"""
+        conn = self.get_connection()
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        cursor.execute(query, params)
+        results = [dict(row) for row in cursor.fetchall()]
+        
+        conn.commit()
+        conn.close()
+        return results
+    
+    def execute_update(self, query: str, params: tuple = ()) -> int:
+        """Execute an update query and return last row ID"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute(query, params)
+        conn.commit()
+        last_id = cursor.lastrowid
+        
+        conn.close()
+        return last_id
+
+    def clear_database(self) -> None:
+        """Clear all data from tables (for testing)"""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("DELETE FROM books")
+        cursor.execute("DELETE FROM staff")
+        cursor.execute("DELETE FROM readers")
+        
+        conn.commit()
+        conn.close()
+        logging.info("Database cleared for testing")
+
+# Global database instance
+db_manager = DatabaseManager()
+
+# Pydantic Models for Basic CRUD Operations
+class BookBase(BaseModel):
+    title: str
+    author: str
+    genre: Optional[str] = None
+    stock: Optional[int] = 1
+
+class BookCreate(BookBase):
+    pass
+
+class BookUpdate(BaseModel):
+    title: Optional[str] = None
+    author: Optional[str] = None
+    genre: Optional[str] = None
+    stock: Optional[int] = None
+
+class BookResponse(BookBase):
+    book_id: int
+    
+    class Config:
+        from_attributes = True
+
+class StaffBase(BaseModel):
+    name: str
+    role: str
+    contact: Optional[str] = None
+
+class StaffCreate(StaffBase):
+    pass
+
+class StaffUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    contact: Optional[str] = None
+
+class StaffResponse(StaffBase):
+    staff_id: int
+    
+    class Config:
+        from_attributes = True
+
+class ReaderBase(BaseModel):
+    name: str
+    contact: Optional[str] = None
+
+class ReaderCreate(ReaderBase):
+    pass
+
+class ReaderUpdate(BaseModel):
+    name: Optional[str] = None
+    contact: Optional[str] = None
+
+class ReaderResponse(ReaderBase):
+    reader_id: int
+    borrowed_books: List[int] = []
+    
+    class Config:
+        from_attributes = True
+
+# Advanced JSON Models for Nested Structures
+class BookDetails(BaseModel):
+    genre: Optional[str] = None
+    stock: Optional[int] = 1
+
+class BookAdvancedCreate(BaseModel):
+    title: str
+    author: str
+    details: BookDetails
+    
+    @validator('title')
+    def title_not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Title cannot be empty')
+        return v.strip()
+    
+    @validator('author')
+    def author_not_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('Author cannot be empty')
+        return v.strip()
+
+class BookAdvancedResponse(BaseModel):
+    book_id: int
+    title: str
+    author: str
+    details: BookDetails
+
+class ReaderDetails(BaseModel):
+    contact: Optional[str] = None
+    borrowed_books: List[int] = []
+
+class ReaderAdvancedCreate(BaseModel):
+    name: str
+    details: ReaderDetails
+
+class ReaderAdvancedResponse(BaseModel):
+    reader_id: int
+    name: str
+    details: ReaderDetails
+
+# JSON Validation Functions
+def validate_book_json(json_data: Dict) -> tuple:
+    """Validate book JSON payload for advanced endpoints"""
     try:
-        response = await call_next(request)
-        process_time = (time.time() - start_time) * 1000
-        
-        # Log response
-        logging.info(f"Response: {response.status_code} - Time: {process_time:.2f}ms")
-        
-        return response
-        
+        book = BookAdvancedCreate(**json_data)
+        return True, book.model_dump()  # Fixed: using model_dump() instead of dict()
     except Exception as e:
-        global error_counter
-        error_counter += 1
-        process_time = (time.time() - start_time) * 1000
-        logging.error(f"Error: {str(e)} - Time: {process_time:.2f}ms")
-        raise e
+        return False, str(e)
 
+def validate_reader_json(json_data: Dict) -> tuple:
+    """Validate reader JSON payload for advanced endpoints"""
+    try:
+        reader = ReaderAdvancedCreate(**json_data)
+        return True, reader.model_dump()  # Fixed: using model_dump() instead of dict()
+    except Exception as e:
+        return False, str(e)
+
+# Database Operations Class
+class LibraryCRUD:
+    # BOOKS CRUD Operations
+    @staticmethod
+    def get_all_books() -> List[Dict]:
+        """Get all books from database"""
+        query = "SELECT * FROM books"
+        return db_manager.execute_query(query)
+    
+    @staticmethod
+    def get_book_by_id(book_id: int) -> Dict:
+        """Get a specific book by ID"""
+        query = "SELECT * FROM books WHERE book_id = ?"
+        results = db_manager.execute_query(query, (book_id,))
+        return results[0] if results else None
+    
+    @staticmethod
+    def create_book(book_data: BookCreate) -> int:
+        """Create a new book"""
+        query = """
+            INSERT INTO books (title, author, genre, stock)
+            VALUES (?, ?, ?, ?)
+        """
+        return db_manager.execute_update(
+            query, 
+            (book_data.title, book_data.author, book_data.genre, book_data.stock)
+        )
+    
+    @staticmethod
+    def update_book(book_id: int, book_data: BookUpdate) -> bool:
+        """Update a book"""
+        # Build dynamic update query
+        updates = []
+        params = []
+        
+        if book_data.title is not None:
+            updates.append("title = ?")
+            params.append(book_data.title)
+        if book_data.author is not None:
+            updates.append("author = ?")
+            params.append(book_data.author)
+        if book_data.genre is not None:
+            updates.append("genre = ?")
+            params.append(book_data.genre)
+        if book_data.stock is not None:
+            updates.append("stock = ?")
+            params.append(book_data.stock)
+        
+        if not updates:
+            return True  # No updates to make
+        
+        query = f"UPDATE books SET {', '.join(updates)} WHERE book_id = ?"
+        params.append(book_id)
+        
+        db_manager.execute_update(query, tuple(params))
+        return True
+    
+    @staticmethod
+    def delete_book(book_id: int) -> bool:
+        """Delete a book"""
+        query = "DELETE FROM books WHERE book_id = ?"
+        db_manager.execute_update(query, (book_id,))
+        return True
+    
+    # STAFF CRUD Operations
+    @staticmethod
+    def get_all_staff() -> List[Dict]:
+        """Get all staff members"""
+        query = "SELECT * FROM staff"
+        return db_manager.execute_query(query)
+    
+    @staticmethod
+    def get_staff_by_id(staff_id: int) -> Dict:
+        """Get a specific staff member by ID"""
+        query = "SELECT * FROM staff WHERE staff_id = ?"
+        results = db_manager.execute_query(query, (staff_id,))
+        return results[0] if results else None
+    
+    @staticmethod
+    def create_staff(staff_data: StaffCreate) -> int:
+        """Create a new staff member"""
+        query = """
+            INSERT INTO staff (name, role, contact)
+            VALUES (?, ?, ?)
+        """
+        return db_manager.execute_update(
+            query,
+            (staff_data.name, staff_data.role, staff_data.contact)
+        )
+    
+    @staticmethod
+    def update_staff(staff_id: int, staff_data: StaffUpdate) -> bool:
+        """Update a staff member"""
+        # Build dynamic update query
+        updates = []
+        params = []
+        
+        if staff_data.name is not None:
+            updates.append("name = ?")
+            params.append(staff_data.name)
+        if staff_data.role is not None:
+            updates.append("role = ?")
+            params.append(staff_data.role)
+        if staff_data.contact is not None:
+            updates.append("contact = ?")
+            params.append(staff_data.contact)
+        
+        if not updates:
+            return True  # No updates to make
+        
+        query = f"UPDATE staff SET {', '.join(updates)} WHERE staff_id = ?"
+        params.append(staff_id)
+        
+        db_manager.execute_update(query, tuple(params))
+        return True
+    
+    @staticmethod
+    def delete_staff(staff_id: int) -> bool:
+        """Delete a staff member"""
+        query = "DELETE FROM staff WHERE staff_id = ?"
+        db_manager.execute_update(query, (staff_id,))
+        return True
+    
+    # READERS CRUD Operations
+    @staticmethod
+    def get_all_readers() -> List[Dict]:
+        """Get all readers"""
+        query = "SELECT * FROM readers"
+        return db_manager.execute_query(query)
+    
+    @staticmethod
+    def get_reader_by_id(reader_id: int) -> Dict:
+        """Get a specific reader by ID"""
+        query = "SELECT * FROM readers WHERE reader_id = ?"
+        results = db_manager.execute_query(query, (reader_id,))
+        return results[0] if results else None
+    
+    @staticmethod
+    def create_reader(reader_data: ReaderCreate) -> int:
+        """Create a new reader"""
+        query = """
+            INSERT INTO readers (name, contact, borrowed_books)
+            VALUES (?, ?, ?)
+        """
+        return db_manager.execute_update(
+            query,
+            (reader_data.name, reader_data.contact, '[]')
+        )
+    
+    @staticmethod
+    def update_reader(reader_id: int, reader_data: ReaderUpdate) -> bool:
+        """Update a reader"""
+        # Build dynamic update query
+        updates = []
+        params = []
+        
+        if reader_data.name is not None:
+            updates.append("name = ?")
+            params.append(reader_data.name)
+        if reader_data.contact is not None:
+            updates.append("contact = ?")
+            params.append(reader_data.contact)
+        
+        if not updates:
+            return True  # No updates to make
+        
+        query = f"UPDATE readers SET {', '.join(updates)} WHERE reader_id = ?"
+        params.append(reader_id)
+        
+        db_manager.execute_update(query, tuple(params))
+        return True
+    
+    @staticmethod
+    def delete_reader(reader_id: int) -> bool:
+        """Delete a reader"""
+        query = "DELETE FROM readers WHERE reader_id = ?"
+        db_manager.execute_update(query, (reader_id,))
+        return True
+
+# Initialize CRUD operations
+crud = LibraryCRUD()
+
+# FastAPI Application
+app = FastAPI(
+    title="Library Management System API",
+    description="Complete library management system with SQLite database integration and advanced JSON handling",
+    version="3.0.0"
+)
+
+# Root endpoint
 @app.get("/")
-def home():
-    """Root endpoint."""
-    return {"message": "Library Management System"}
+def root():
+    return {
+        "message": "Library Management System API",
+        "version": "3.0.0",
+        "database": "SQLite",
+        "timestamp": datetime.now().isoformat()
+    }
 
-@app.get("/items")
-def get_items():
-    """Get all books from the library (legacy endpoint)."""
-    books = book_manager.get_all_books()
-    return [f"{book['title']} by {book['author']}" for book in books]
-
+# Health check endpoint
 @app.get("/health")
 def health_check():
-    """Health check endpoint with monitoring stats."""
     return {
-        "status": "ok",
-        "request_counts": request_counter,
-        "total_errors": error_counter
+        "status": "healthy",
+        "database": "connected",
+        "timestamp": datetime.now().isoformat()
     }
 
 # BOOKS CRUD ENDPOINTS
+@app.get("/books", response_model=List[BookResponse])
+def get_books():
+    """Get all books"""
+    books = crud.get_all_books()
+    return books
 
-@app.get("/books")
-def get_all_books():
-    """Get all books with details."""
-    return book_manager.get_all_books()
-
-@app.post("/books")
-def add_book(title: str, author: str):
-    """Add a new book."""
-    if not title or not author:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Title and author are required"
-        )
-    
-    new_book = book_manager.add_book(title, author)
-    return {"message": "Book added successfully", "book": new_book}
-
-@app.put("/books/{book_id}")
-def update_book(book_id: int, title: str, author: str):
-    """Update a book by ID."""
-    if not title or not author:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Title and author are required"
-        )
-    
-    updated_book = book_manager.update_book(book_id, title, author)
-    if updated_book:
-        return {"message": "Book updated successfully", "book": updated_book}
-    else:
+@app.get("/books/{book_id}", response_model=BookResponse)
+def get_book(book_id: int):
+    """Get a specific book by ID"""
+    book = crud.get_book_by_id(book_id)
+    if not book:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Book with ID {book_id} not found"
         )
+    return book
+
+@app.post("/books", response_model=Dict)
+def create_book(book_data: BookCreate):
+    """Create a new book"""
+    book_id = crud.create_book(book_data)
+    new_book = crud.get_book_by_id(book_id)
+    return {
+        "message": "Book created successfully",
+        "book": new_book
+    }
+
+@app.put("/books/{book_id}", response_model=Dict)
+def update_book(book_id: int, book_data: BookUpdate):
+    """Update a book"""
+    existing_book = crud.get_book_by_id(book_id)
+    if not existing_book:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Book with ID {book_id} not found"
+        )
+    
+    crud.update_book(book_id, book_data)
+    updated_book = crud.get_book_by_id(book_id)
+    return {
+        "message": "Book updated successfully",
+        "book": updated_book
+    }
 
 @app.delete("/books/{book_id}")
 def delete_book(book_id: int):
-    """Delete a book by ID."""
-    success = book_manager.delete_book(book_id)
-    if success:
-        return {"message": f"Book with ID {book_id} deleted successfully"}
-    else:
+    """Delete a book"""
+    existing_book = crud.get_book_by_id(book_id)
+    if not existing_book:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Book with ID {book_id} not found"
         )
-
-# READERS CRUD ENDPOINTS
-
-@app.get("/readers")
-def get_all_readers():
-    """Get all readers."""
-    return reader_manager.get_all_readers()
-
-@app.post("/readers")
-def add_reader(name: str, membership_id: str):
-    """Add a new reader."""
-    if not name or not membership_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Name and membership ID are required"
-        )
     
-    new_reader = reader_manager.add_reader(name, membership_id)
-    return {"message": "Reader added successfully", "reader": new_reader}
-
-@app.put("/readers/{reader_id}")
-def update_reader(reader_id: int, name: str, membership_id: str):
-    """Update a reader by ID."""
-    if not name or not membership_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Name and membership ID are required"
-        )
-    
-    updated_reader = reader_manager.update_reader(reader_id, name, membership_id)
-    if updated_reader:
-        return {"message": "Reader updated successfully", "reader": updated_reader}
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Reader with ID {reader_id} not found"
-        )
-
-@app.delete("/readers/{reader_id}")
-def delete_reader(reader_id: int):
-    """Delete a reader by ID."""
-    success = reader_manager.delete_reader(reader_id)
-    if success:
-        return {"message": f"Reader with ID {reader_id} deleted successfully"}
-    else:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Reader with ID {reader_id} not found"
-        )
+    crud.delete_book(book_id)
+    return {"message": f"Book with ID {book_id} deleted successfully"}
 
 # STAFF CRUD ENDPOINTS
+@app.get("/staff", response_model=List[StaffResponse])
+def get_staff():
+    """Get all staff members"""
+    staff = crud.get_all_staff()
+    return staff
 
-@app.get("/staff")
-def get_all_staff():
-    """Get all staff members."""
-    return staff_manager.get_all_staff()
-
-@app.post("/staff")
-def add_staff(name: str, position: str):
-    """Add a new staff member."""
-    if not name or not position:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Name and position are required"
-        )
-    
-    new_staff = staff_manager.add_staff(name, position)
-    return {"message": "Staff member added successfully", "staff": new_staff}
-
-@app.put("/staff/{staff_id}")
-def update_staff(staff_id: int, name: str, position: str):
-    """Update a staff member by ID."""
-    if not name or not position:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Name and position are required"
-        )
-    
-    updated_staff = staff_manager.update_staff(staff_id, name, position)
-    if updated_staff:
-        return {"message": "Staff member updated successfully", "staff": updated_staff}
-    else:
+@app.get("/staff/{staff_id}", response_model=StaffResponse)
+def get_staff_member(staff_id: int):
+    """Get a specific staff member by ID"""
+    staff = crud.get_staff_by_id(staff_id)
+    if not staff:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Staff member with ID {staff_id} not found"
         )
+    return staff
+
+@app.post("/staff", response_model=Dict)
+def create_staff(staff_data: StaffCreate):
+    """Create a new staff member"""
+    staff_id = crud.create_staff(staff_data)
+    new_staff = crud.get_staff_by_id(staff_id)
+    return {
+        "message": "Staff member created successfully",
+        "staff": new_staff
+    }
+
+@app.put("/staff/{staff_id}", response_model=Dict)
+def update_staff(staff_id: int, staff_data: StaffUpdate):
+    """Update a staff member"""
+    existing_staff = crud.get_staff_by_id(staff_id)
+    if not existing_staff:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Staff member with ID {staff_id} not found"
+        )
+    
+    crud.update_staff(staff_id, staff_data)
+    updated_staff = crud.get_staff_by_id(staff_id)
+    return {
+        "message": "Staff member updated successfully",
+        "staff": updated_staff
+    }
 
 @app.delete("/staff/{staff_id}")
 def delete_staff(staff_id: int):
-    """Delete a staff member by ID."""
-    success = staff_manager.delete_staff(staff_id)
-    if success:
-        return {"message": f"Staff member with ID {staff_id} deleted successfully"}
-    else:
+    """Delete a staff member"""
+    existing_staff = crud.get_staff_by_id(staff_id)
+    if not existing_staff:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Staff member with ID {staff_id} not found"
         )
+    
+    crud.delete_staff(staff_id)
+    return {"message": f"Staff member with ID {staff_id} deleted successfully"}
+
+# READERS CRUD ENDPOINTS
+@app.get("/readers", response_model=List[ReaderResponse])
+def get_readers():
+    """Get all readers"""
+    readers = crud.get_all_readers()
+    # Parse borrowed_books from JSON string to list
+    for reader in readers:
+        if isinstance(reader.get('borrowed_books'), str):
+            try:
+                reader['borrowed_books'] = json.loads(reader['borrowed_books'])
+            except:
+                reader['borrowed_books'] = []
+    return readers
+
+@app.get("/readers/{reader_id}", response_model=ReaderResponse)
+def get_reader(reader_id: int):
+    """Get a specific reader by ID"""
+    reader = crud.get_reader_by_id(reader_id)
+    if not reader:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Reader with ID {reader_id} not found"
+        )
+    
+    # Parse borrowed_books
+    if isinstance(reader.get('borrowed_books'), str):
+        try:
+            reader['borrowed_books'] = json.loads(reader['borrowed_books'])
+        except:
+            reader['borrowed_books'] = []
+    
+    return reader
+
+@app.post("/readers", response_model=Dict)
+def create_reader(reader_data: ReaderCreate):
+    """Create a new reader"""
+    reader_id = crud.create_reader(reader_data)
+    new_reader = crud.get_reader_by_id(reader_id)
+    
+    # Parse borrowed_books
+    if isinstance(new_reader.get('borrowed_books'), str):
+        new_reader['borrowed_books'] = json.loads(new_reader['borrowed_books'])
+    
+    return {
+        "message": "Reader created successfully",
+        "reader": new_reader
+    }
+
+@app.put("/readers/{reader_id}", response_model=Dict)
+def update_reader(reader_id: int, reader_data: ReaderUpdate):
+    """Update a reader"""
+    existing_reader = crud.get_reader_by_id(reader_id)
+    if not existing_reader:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Reader with ID {reader_id} not found"
+        )
+    
+    crud.update_reader(reader_id, reader_data)
+    updated_reader = crud.get_reader_by_id(reader_id)
+    
+    # Parse borrowed_books
+    if isinstance(updated_reader.get('borrowed_books'), str):
+        updated_reader['borrowed_books'] = json.loads(updated_reader['borrowed_books'])
+    
+    return {
+        "message": "Reader updated successfully",
+        "reader": updated_reader
+    }
+
+@app.delete("/readers/{reader_id}")
+def delete_reader(reader_id: int):
+    """Delete a reader"""
+    existing_reader = crud.get_reader_by_id(reader_id)
+    if not existing_reader:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Reader with ID {reader_id} not found"
+        )
+    
+    crud.delete_reader(reader_id)
+    return {"message": f"Reader with ID {reader_id} deleted successfully"}
+
+# ADVANCED JSON HANDLING ENDPOINTS
+@app.post("/books/advanced", response_model=BookAdvancedResponse)
+def create_book_advanced(book_data: BookAdvancedCreate):
+    """Create a new book with nested JSON structure"""
+    # Convert advanced format to basic format for database
+    basic_book = BookCreate(
+        title=book_data.title,
+        author=book_data.author,
+        genre=book_data.details.genre,
+        stock=book_data.details.stock
+    )
+    
+    book_id = crud.create_book(basic_book)
+    new_book = crud.get_book_by_id(book_id)
+    
+    # Return in advanced nested format
+    return BookAdvancedResponse(
+        book_id=new_book['book_id'],
+        title=new_book['title'],
+        author=new_book['author'],
+        details=BookDetails(
+            genre=new_book['genre'],
+            stock=new_book['stock']
+        )
+    )
+
+@app.get("/books/advanced/{book_id}", response_model=BookAdvancedResponse)
+def get_book_advanced(book_id: int):
+    """Get a book with nested JSON response"""
+    book = crud.get_book_by_id(book_id)
+    if not book:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Book with ID {book_id} not found"
+        )
+    
+    return BookAdvancedResponse(
+        book_id=book['book_id'],
+        title=book['title'],
+        author=book['author'],
+        details=BookDetails(
+            genre=book['genre'],
+            stock=book['stock']
+        )
+    )
+
+@app.post("/readers/advanced", response_model=ReaderAdvancedResponse)
+def create_reader_advanced(reader_data: ReaderAdvancedCreate):
+    """Create a new reader with nested JSON structure"""
+    # Convert advanced format to basic format for database
+    basic_reader = ReaderCreate(
+        name=reader_data.name,
+        contact=reader_data.details.contact
+    )
+    
+    reader_id = crud.create_reader(basic_reader)
+    new_reader = crud.get_reader_by_id(reader_id)
+    
+    # Parse borrowed_books
+    borrowed_books = []
+    if isinstance(new_reader.get('borrowed_books'), str):
+        try:
+            borrowed_books = json.loads(new_reader['borrowed_books'])
+        except:
+            borrowed_books = []
+    
+    # Return in advanced nested format
+    return ReaderAdvancedResponse(
+        reader_id=new_reader['reader_id'],
+        name=new_reader['name'],
+        details=ReaderDetails(
+            contact=new_reader['contact'],
+            borrowed_books=borrowed_books
+        )
+    )
+
+@app.get("/readers/advanced/{reader_id}", response_model=ReaderAdvancedResponse)
+def get_reader_advanced(reader_id: int):
+    """Get a reader with nested JSON response"""
+    reader = crud.get_reader_by_id(reader_id)
+    if not reader:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Reader with ID {reader_id} not found"
+        )
+    
+    # Parse borrowed_books
+    borrowed_books = []
+    if isinstance(reader.get('borrowed_books'), str):
+        try:
+            borrowed_books = json.loads(reader['borrowed_books'])
+        except:
+            borrowed_books = []
+    
+    return ReaderAdvancedResponse(
+        reader_id=reader['reader_id'],
+        name=reader['name'],
+        details=ReaderDetails(
+            contact=reader['contact'],
+            borrowed_books=borrowed_books
+        )
+    )
+
+# JSON VALIDATION ENDPOINTS
+@app.post("/validate/book")
+def validate_book_json_endpoint(payload: Dict):
+    """Validate book JSON payload"""
+    is_valid, result = validate_book_json(payload)
+    if is_valid:
+        return {
+            "valid": True,
+            "message": "JSON payload is valid",
+            "data": result
+        }
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON payload: {result}"
+        )
+
+@app.post("/validate/reader")
+def validate_reader_json_endpoint(payload: Dict):
+    """Validate reader JSON payload"""
+    is_valid, result = validate_reader_json(payload)
+    if is_valid:
+        return {
+            "valid": True,
+            "message": "JSON payload is valid",
+            "data": result
+        }
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid JSON payload: {result}"
+        )
+
+# Database initialization endpoint
+@app.post("/init-db")
+def initialize_database():
+    """Initialize the database (creates tables if they don't exist)"""
+    db_manager.init_database()
+    return {"message": "Database initialized successfully"}
+
+# Database cleanup endpoint (for testing)
+@app.post("/clear-db")
+def clear_database():
+    """Clear all data from database (for testing purposes)"""
+    db_manager.clear_database()
+    return {"message": "Database cleared successfully"}
 
 if __name__ == "__main__":
     import uvicorn
