@@ -1,44 +1,34 @@
 {
-  "readers": [
+  "metadata": {
+    "table_name": "readers",
+    "record_count": 4,
+    "export_timestamp": "2025-11-21T08:59:20.960003",
+    "database_source": "library.db"
+  },
+  "data": [
     {
-      "id": 1,
-      "name": "Sweta Rajput",
-      "membership_id": "MEM002",
-      "email": "",
-      "phone": "",
-      "membership_type": "Standard",
-      "join_date": "2024-01-01",
-      "books_borrowed": []
+      "reader_id": 4,
+      "name": "Student Reader",
+      "contact": "student@university.com",
+      "borrowed_books": []
     },
     {
-      "id": 2,
-      "name": "Jane Doe",
-      "membership_id": "MEM456",
-      "email": "",
-      "phone": "",
-      "membership_type": "Standard",
-      "join_date": "2024-01-01",
-      "books_borrowed": []
+      "reader_id": 5,
+      "name": "Research Scholar",
+      "contact": "researcher@institute.org",
+      "borrowed_books": []
     },
     {
-      "id": 3,
-      "name": "Jane Doe",
-      "membership_id": "MEM456",
-      "email": "",
-      "phone": "",
-      "membership_type": "Standard",
-      "join_date": "2024-01-01",
-      "books_borrowed": []
+      "reader_id": 6,
+      "name": "Book Club Member",
+      "contact": "bookclub@community.com",
+      "borrowed_books": []
     },
     {
-      "id": 4,
-      "name": "Jane Doe",
-      "membership_id": "MEM456",
-      "email": "",
-      "phone": "",
-      "membership_type": "Standard",
-      "join_date": "2024-01-01",
-      "books_borrowed": []
+      "reader_id": 7,
+      "name": "Advanced Reader",
+      "contact": "advanced@reader.com",
+      "borrowed_books": []
     }
   ]
 }

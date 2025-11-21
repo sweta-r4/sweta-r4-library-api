@@ -1,48 +1,28 @@
 {
-  "staff": [
+  "metadata": {
+    "table_name": "staff",
+    "record_count": 3,
+    "export_timestamp": "2025-11-21T08:59:20.959632",
+    "database_source": "library.db"
+  },
+  "data": [
     {
-      "id": 1,
-      "name": "Hardik Upadhyay",
-      "position": "Assistant Librarian",
-      "email": "",
-      "phone": "",
-      "department": "",
-      "salary": 0,
-      "hire_date": "2024-01-01",
-      "is_active": true
+      "staff_id": 4,
+      "name": "Library Manager",
+      "role": "Manager",
+      "contact": "manager@library.com"
     },
     {
-      "id": 2,
-      "name": "John Smith",
-      "position": "Senior Librarian",
-      "email": "",
-      "phone": "",
-      "department": "",
-      "salary": 0,
-      "hire_date": "2024-01-01",
-      "is_active": true
+      "staff_id": 5,
+      "name": "Senior Librarian",
+      "role": "Librarian",
+      "contact": "librarian@library.com"
     },
     {
-      "id": 3,
-      "name": "John Smith",
-      "position": "Senior Librarian",
-      "email": "",
-      "phone": "",
-      "department": "",
-      "salary": 0,
-      "hire_date": "2024-01-01",
-      "is_active": true
-    },
-    {
-      "id": 4,
-      "name": "John Smith",
-      "position": "Senior Librarian",
-      "email": "",
-      "phone": "",
-      "department": "",
-      "salary": 0,
-      "hire_date": "2024-01-01",
-      "is_active": true
+      "staff_id": 6,
+      "name": "IT Support",
+      "role": "Technical Staff",
+      "contact": "it@library.com"
     }
   ]
 }

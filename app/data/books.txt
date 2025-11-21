@@ -1,2 +1,2 @@
-Advanced Python, Jane Smith
 Learning FastAPI, Alice Walker
+PythonGuide, John Doe

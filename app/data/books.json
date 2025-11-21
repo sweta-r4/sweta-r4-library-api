@@ -1,22 +1,38 @@
 {
-  "books": [
+  "metadata": {
+    "table_name": "books",
+    "record_count": 4,
+    "export_timestamp": "2025-11-21T08:59:20.959280",
+    "database_source": "library.db"
+  },
+  "data": [
     {
-      "id": 1,
-      "title": "Advanced Python",
-      "author": "Jane Smith",
-      "isbn": "",
-      "published_year": null,
-      "genre": "",
-      "available": true
+      "book_id": 24,
+      "title": "Database Programming",
+      "author": "Maria Garcia",
+      "genre": "Computer Science",
+      "stock": 8
     },
     {
-      "id": 2,
-      "title": "Learning FastAPI",
-      "author": "Alice Walker",
-      "isbn": "",
-      "published_year": null,
-      "genre": "",
-      "available": true
+      "book_id": 25,
+      "title": "Web Development",
+      "author": "David Chen",
+      "genre": "Technology",
+      "stock": 12
+    },
+    {
+      "book_id": 26,
+      "title": "Machine Learning",
+      "author": "Sarah Johnson",
+      "genre": "AI",
+      "stock": 6
+    },
+    {
+      "book_id": 27,
+      "title": "JSON API Development",
+      "author": "JSON Expert",
+      "genre": "Programming",
+      "stock": 15
     }
   ]
 }

@@ -1,0 +1,19 @@
+{
+  "table": "sqlite_sequence",
+  "count": 3,
+  "exported_at": "2025-11-21T08:40:30.844197",
+  "data": [
+    {
+      "name": "books",
+      "seq": 26
+    },
+    {
+      "name": "staff",
+      "seq": 3
+    },
+    {
+      "name": "readers",
+      "seq": 3
+    }
+  ]
+}
